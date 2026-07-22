@@ -92,10 +92,12 @@ export class ItemRequestDto {
 export class CreateAsfiRequestDto {
   @IsString({ message: 'El cargo de la autoridad solicitante debe ser un texto' })
   @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
   authorityPosition: string;
 
   @IsString({ message: 'El nombre de la autoridad solicitante debe ser un texto' })
   @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
   requestingAuthority: string;
 
   @Type(() => Number)
@@ -106,6 +108,7 @@ export class CreateAsfiRequestDto {
 
   @IsString({ message: 'La gerencia debe ser un texto' })
   @IsNotEmpty()
+  @Transform(({ value }) => value?.trim())
   department: string;
 
   @IsIn(['R', 'S'], { message: 'El tipo de procesos deber ser R o S' })

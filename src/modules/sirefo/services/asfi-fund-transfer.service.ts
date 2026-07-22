@@ -236,6 +236,6 @@ export class AsfiFundTransferService {
 
   private buildCiteCode(requestCode: number) {
     const year = new Date().getFullYear();
-    return `CE/SF-DRT-72/${requestCode}/${year}`;
+    return `CE/SF-DRT-38/${requestCode}/${year}`;
   }
 }

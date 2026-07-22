@@ -163,7 +163,7 @@ export class AsfiRequestService {
 
   private buildCiteCode(requestCode: number) {
     const year = new Date().getFullYear();
-    return `CE/SF-DRT-72/${requestCode}/${year}`;
+    return `CE/SF-DRT-38/${requestCode}/${year}`;
   }
 
   private async checkDuplicateRequestCode(code: string): Promise<void> {
