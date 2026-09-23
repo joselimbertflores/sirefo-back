@@ -44,7 +44,7 @@ export class UserService {
   async update(id: number, user: UpdateUserDto) {
     const userDB = await this.prisma.user.findFirst({ where: { id } });
     if (!userDB) throw new NotFoundException(`El usuario editado no existe`);
-    if (user.login !== userDB.login) await this.checkDuplicateLogin(user.login);
+    if (user.login !== undefined && user.login !== userDB.login) await this.checkDuplicateLogin(user.login);
     if (user.password) user['password'] = await this.encryptPassword(user.password);
     const updateduser = await this.prisma.user.update({ where: { id }, data: user });
     return this.plainUser(updateduser);

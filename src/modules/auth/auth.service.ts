@@ -1,5 +1,4 @@
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
 import { AuthOrigin, AuthSession, User } from 'generated/prisma';
 
@@ -23,7 +22,6 @@ export class AuthService {
     if (!user?.password || !bcrypt.compareSync(password, user.password)) {
       throw new UnauthorizedException('Usuario o Contraseña incorrectos');
     }
-    this.ensureActive(user);
 
     const session = await this.sessionService.createLocal(user.id);
     return { session, account: this.buildAccount(user, AuthOrigin.LOCAL) };
@@ -36,19 +34,26 @@ export class AuthService {
   async completeSiauLogin(code: string, state: string) {
     const tokens = await this.siauService.exchangeAuthorizationCode(code, state);
     const externalKey = tokens.claims.externalKey;
-    const user = await this.prisma.user.upsert({
-      where: { externalKey },
-      update: {},
-      create: {
-        externalKey,
-        fullName: tokens.claims.name,
-        position: null,
-        login: this.buildJitLogin(externalKey),
-        password: null,
-        roles: [UserRole.EMPLOYEE],
-      },
-    });
-    this.ensureActive(user);
+    const fullName = tokens.claims.name;
+    let user = await this.prisma.user.findUnique({ where: { externalKey } });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          externalKey,
+          fullName,
+          position: null,
+          login: null,
+          password: null,
+          roles: [UserRole.EMPLOYEE],
+        },
+      });
+    } else if (user.fullName !== fullName) {
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { fullName },
+      });
+    }
 
     const session = await this.sessionService.createSiau(user.id, tokens);
     return { session, account: this.buildAccount(user, AuthOrigin.SIAU) };
@@ -82,15 +87,6 @@ export class AuthService {
       mustChangePassword: origin === AuthOrigin.LOCAL && user.mustChangePassword,
       authOrigin: origin,
     };
-  }
-
-  private ensureActive(user: User): void {
-    if (!user.active) throw new UnauthorizedException('La cuenta ha sido deshabilitada');
-  }
-
-  private buildJitLogin(externalKey: string): string {
-    const digest = createHash('sha256').update(externalKey).digest('hex').slice(0, 32);
-    return `siau_${digest}`;
   }
 
   private getFrontMenu(roles: UserRole[]): Menu[] {

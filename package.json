@@ -85,5 +85,12 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "allowScripts": {
+    "@nestjs/core@11.1.1": true,
+    "@prisma/client@6.8.2": true,
+    "@prisma/engines@6.8.2": true,
+    "bcrypt@6.0.0": true,
+    "prisma@6.8.2": true
   }
 }

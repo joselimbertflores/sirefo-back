@@ -83,10 +83,9 @@ model User {
   fullName           String
   position           String?
   asfiCredentials    AsfiCredentials?
-  login              String             @unique
+  login              String?            @unique
   password           String?
   externalKey        String?            @unique
-  active             Boolean            @default(true)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
   roles              String[]           @default(["employee"])

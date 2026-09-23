@@ -59,7 +59,7 @@ export class SessionService {
       include: { user: true },
     });
 
-    if (!session || session.expiresAt <= new Date() || !session.user.active) {
+    if (!session || session.expiresAt <= new Date()) {
       if (session) await this.destroy(session.id);
       throw new UnauthorizedException();
     }
@@ -92,7 +92,7 @@ export class SessionService {
         });
 
         if (!current) return null;
-        if (current.origin !== AuthOrigin.SIAU || current.expiresAt <= new Date() || !current.user.active) {
+        if (current.origin !== AuthOrigin.SIAU || current.expiresAt <= new Date()) {
           await tx.authSession.delete({ where: { id: sessionId } });
           return null;
         }

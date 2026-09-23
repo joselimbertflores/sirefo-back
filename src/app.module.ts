@@ -22,9 +22,9 @@ import { join } from 'path';
     UsersModule,
     SchedulerModule,
     AuthModule,
-    ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'public'),
-    }),
+    // ServeStaticModule.forRoot({
+    //   rootPath: join(__dirname, '..', 'public'),
+    // }),
   ],
   controllers: [],
   providers: [],
