@@ -1,63 +1,99 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import * as bcrypt from 'bcrypt';
-import { User } from 'generated/prisma';
-
-import { AuthDto, UpdateMyUserDto } from './dto';
+import { AuthOrigin, AuthSession, User } from 'generated/prisma';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { FRONTEND_MENU, Menu } from './constants';
-import { JwtPayload } from './interfaces';
 import { UserRole } from '../users/domain';
+import { FRONTEND_MENU, Menu } from './constants';
+import { AuthDto, UpdateMyUserDto } from './dto';
+import { SessionService } from './services/session.service';
+import { SiauService } from './services/siau.service';
 
 @Injectable()
 export class AuthService {
   constructor(
-    private jwtService: JwtService,
-    private prisma: PrismaService,
+    private readonly prisma: PrismaService,
+    private readonly sessionService: SessionService,
+    private readonly siauService: SiauService,
   ) {}
 
-  async login({ login, password }: AuthDto) {
-    const user = await this.prisma.user.findFirst({ where: { login } });
-    if (!user) {
-      throw new BadRequestException('Usuario o Contraseña incorrectos');
+  async loginLocal({ login, password }: AuthDto) {
+    const user = await this.prisma.user.findUnique({ where: { login } });
+    if (!user?.password || !bcrypt.compareSync(password, user.password)) {
+      throw new UnauthorizedException('Usuario o Contraseña incorrectos');
     }
-    if (!bcrypt.compareSync(password, user.password)) {
-      throw new BadRequestException('Usuario o Contraseña incorrectos');
-    }
-    if (!user.active) {
-      throw new BadRequestException('La cuenta ha sido deshabilidata');
-    }
-    return { token: this.generateToken(user) };
+    this.ensureActive(user);
+
+    const session = await this.sessionService.createLocal(user.id);
+    return { session, account: this.buildAccount(user, AuthOrigin.LOCAL) };
   }
 
-  async checkAuthStatus(user: User) {
-    return {
-      token: this.generateToken(user),
-      menu: this.getFrontMenu(user.roles as UserRole[]),
-      roles: user.roles,
-      mustChangePassword: user.mustChangePassword,
-    };
+  startSiauLogin(): Promise<string> {
+    return this.siauService.createAuthorizationUrl();
   }
 
-  async updateMyUser(id: number, data: UpdateMyUserDto) {
-    const { password } = data;
-    const encryptedPassword = await this.encryptPassword(password);
-    await this.prisma.user.update({where:{id}, data: { password: encryptedPassword }});
+  async completeSiauLogin(code: string, state: string) {
+    const tokens = await this.siauService.exchangeAuthorizationCode(code, state);
+    const externalKey = tokens.claims.externalKey;
+    const user = await this.prisma.user.upsert({
+      where: { externalKey },
+      update: {},
+      create: {
+        externalKey,
+        fullName: tokens.claims.name,
+        position: null,
+        login: this.buildJitLogin(externalKey),
+        password: null,
+        roles: [UserRole.EMPLOYEE],
+      },
+    });
+    this.ensureActive(user);
+
+    const session = await this.sessionService.createSiau(user.id, tokens);
+    return { session, account: this.buildAccount(user, AuthOrigin.SIAU) };
+  }
+
+  getMyAccount(user: User, session: AuthSession) {
+    return this.buildAccount(user, session.origin);
+  }
+
+  async updateMyUser(user: User, data: UpdateMyUserDto) {
+    if (!user.password) {
+      throw new BadRequestException('SIAU-only users do not have a local password');
+    }
+    const encryptedPassword = await this.encryptPassword(data.password);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { password: encryptedPassword, mustChangePassword: false },
+    });
     return { message: 'Contraseña actualizada' };
   }
 
-  private generateToken(user: User): string {
-    const payload: JwtPayload = {
-      userId: user.id,
-      fullName: user.fullName,
-      position: user.position,
+  private buildAccount(user: User, origin: AuthOrigin) {
+    return {
+      user: {
+        userId: user.id,
+        fullName: user.fullName,
+        position: user.position,
+      },
+      roles: user.roles,
+      menu: this.getFrontMenu(user.roles as UserRole[]),
+      mustChangePassword: origin === AuthOrigin.LOCAL && user.mustChangePassword,
+      authOrigin: origin,
     };
-    return this.jwtService.sign(payload);
   }
 
-  private getFrontMenu(roles: UserRole[]) {
+  private ensureActive(user: User): void {
+    if (!user.active) throw new UnauthorizedException('La cuenta ha sido deshabilitada');
+  }
+
+  private buildJitLogin(externalKey: string): string {
+    const digest = createHash('sha256').update(externalKey).digest('hex').slice(0, 32);
+    return `siau_${digest}`;
+  }
+
+  private getFrontMenu(roles: UserRole[]): Menu[] {
     return this.filterMenuByRoles(structuredClone(FRONTEND_MENU), roles);
   }
 
@@ -65,31 +101,16 @@ export class AuthService {
     return menu
       .map((item) => {
         if (item.items) {
-          const filteredChildren = this.filterMenuByRoles(item.items, userRoles);
-          if (filteredChildren.length > 0) {
-            return { ...item, children: filteredChildren };
-          }
-          return null;
+          const items = this.filterMenuByRoles(item.items, userRoles);
+          return items.length > 0 ? { ...item, items } : null;
         }
-
-        // Si no tiene rol asignado, mostrarlo a todos
-        if (!item.role) {
-          return item;
-        }
-
-        // Si tiene rol, verificar si alguno de los roles del usuario lo permite
-        if (userRoles.includes(item.role)) {
-          return item;
-        }
-
-        return null;
+        return !item.role || userRoles.includes(item.role) ? item : null;
       })
-      .filter(Boolean); // eliminar elementos nulos
+      .filter((item): item is Menu => item !== null);
   }
 
   private async encryptPassword(password: string): Promise<string> {
-    const saltRounds = 10;
-    const salt = await bcrypt.genSalt(saltRounds);
+    const salt = await bcrypt.genSalt(10);
     return bcrypt.hash(password, salt);
   }
 }

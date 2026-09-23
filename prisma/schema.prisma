@@ -28,7 +28,7 @@ model AsfiRequest {
   circularNumber      String?
   processType         ProcessType
   file                AsfiRequestFile?
-  status              AsfiRequestStatus      @default(draft)
+  status              AsfiRequestStatus  @default(draft)
   fundTransfers       AsfiFundTransfer[]
   user                User               @relation(fields: [userId], references: [id])
   userId              Int
@@ -52,7 +52,7 @@ model AsfiFundTransfer {
   circularNumber      String?
   asfiRequestId       String
   asfiRequest         AsfiRequest       @relation(fields: [asfiRequestId], references: [id])
-  status              AsfiRequestStatus     @default(draft)
+  status              AsfiRequestStatus @default(draft)
   file                AsfiTransferFile?
   user                User              @relation(fields: [userId], references: [id])
   userId              Int
@@ -81,10 +81,11 @@ model AsfiTransferFile {
 model User {
   id                 Int                @id @default(autoincrement())
   fullName           String
-  position           String
+  position           String?
   asfiCredentials    AsfiCredentials?
   login              String             @unique
-  password           String
+  password           String?
+  externalKey        String?            @unique
   active             Boolean            @default(true)
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
@@ -92,6 +93,35 @@ model User {
   mustChangePassword Boolean            @default(false)
   asfiFundTransfer   AsfiFundTransfer[]
   asfiRequest        AsfiRequest[]
+  authSessions       AuthSession[]
+}
+
+model AuthSession {
+  id                    String     @id
+  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                Int
+  origin                AuthOrigin
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  siauSid               String?
+  expiresAt             DateTime
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+  lastUsedAt            DateTime   @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model OAuthTransaction {
+  state        String   @id
+  codeVerifier String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 model AsfiCredentials {
@@ -113,4 +143,9 @@ enum AsfiRequestStatus {
   sent
   rejected
   accepted
+}
+
+enum AuthOrigin {
+  LOCAL
+  SIAU
 }

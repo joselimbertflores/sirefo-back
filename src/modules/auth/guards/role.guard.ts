@@ -10,13 +10,16 @@ import { META_ROLE } from '../decorators';
 export class RoleGuard implements CanActivate {
   constructor(private reflector: Reflector) {}
   canActivate(context: ExecutionContext): boolean {
-    const requiredRole: UserRole | undefined = this.reflector.get(META_ROLE, context.getHandler());
+    const requiredRole: UserRole | undefined = this.reflector.getAllAndOverride(META_ROLE, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
     if (!requiredRole) return true;
 
     const req = context.switchToHttp().getRequest();
     const user: User = req['user'];
 
-    if (!user) throw new InternalServerErrorException('ReportGuard error, no user in request');
+    if (!user) throw new InternalServerErrorException('RoleGuard error, no user in request');
 
     return user.roles.some((resource) => resource === requiredRole);
   }
