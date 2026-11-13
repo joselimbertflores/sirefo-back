@@ -1,17 +1,17 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
 import { AuthOrigin, AuthSession, User } from 'generated/prisma';
 
 import { EnvVars } from 'src/config';
 import { PrismaService } from 'src/modules/prisma/prisma.service';
-import { SiauTokenSet } from '../interfaces';
 import { SiauService } from './siau.service';
 
 export type AuthenticatedSession = AuthSession & { user: User };
 
 @Injectable()
 export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
   private readonly sessionTtlMilliseconds: number;
 
   constructor(
@@ -19,7 +19,7 @@ export class SessionService {
     private readonly siauService: SiauService,
     configService: ConfigService<EnvVars>,
   ) {
-    this.sessionTtlMilliseconds = (configService.get('SESSION_TTL_SECONDS') ?? 28_800) * 1000;
+    this.sessionTtlMilliseconds = (configService.get('SESSION_TTL_SECONDS') ?? 36_000) * 1000;
   }
 
   get sessionTtl(): number {
@@ -37,24 +37,20 @@ export class SessionService {
     });
   }
 
-  async createSiau(userId: number, tokens: SiauTokenSet): Promise<AuthSession> {
+  async createSiau(userId: number, sid: string): Promise<AuthSession> {
     return this.prisma.authSession.create({
       data: {
         id: this.generateSessionId(),
         userId,
         origin: AuthOrigin.SIAU,
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        accessTokenExpiresAt: tokens.accessTokenExpiresAt,
-        refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
-        siauSid: tokens.claims.sid,
+        siauSid: sid,
         expiresAt: this.getSessionExpiration(),
       },
     });
   }
 
   async authenticate(sessionId: string): Promise<AuthenticatedSession> {
-    let session = await this.prisma.authSession.findUnique({
+    const session = await this.prisma.authSession.findUnique({
       where: { id: sessionId },
       include: { user: true },
     });
@@ -64,17 +60,11 @@ export class SessionService {
       throw new UnauthorizedException();
     }
 
-    if (
-      session.origin === AuthOrigin.SIAU &&
-      (!session.accessTokenExpiresAt || session.accessTokenExpiresAt.getTime() <= Date.now() + 30_000)
-    ) {
-      session = await this.refreshSiauSession(session.id);
-    }
-
-    await this.prisma.authSession.update({
+    const updated = await this.prisma.authSession.updateMany({
       where: { id: session.id },
       data: { lastUsedAt: new Date() },
     });
+    if (updated.count === 0) throw new UnauthorizedException();
     return session;
   }
 
@@ -82,52 +72,25 @@ export class SessionService {
     await this.prisma.authSession.deleteMany({ where: { id: sessionId } });
   }
 
-  private async refreshSiauSession(sessionId: string): Promise<AuthenticatedSession> {
-    const session = await this.prisma.$transaction(
-      async (tx) => {
-        await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${sessionId}, 0))`;
-        const current = await tx.authSession.findUnique({
-          where: { id: sessionId },
-          include: { user: true },
-        });
+  async logout(sessionId: string): Promise<void> {
+    const session = await this.prisma.authSession.findUnique({
+      where: { id: sessionId },
+      select: { origin: true, siauSid: true },
+    });
 
-        if (!current) return null;
-        if (current.origin !== AuthOrigin.SIAU || current.expiresAt <= new Date()) {
-          await tx.authSession.delete({ where: { id: sessionId } });
-          return null;
-        }
+    await this.destroy(sessionId);
 
-        if (current.accessTokenExpiresAt && current.accessTokenExpiresAt.getTime() > Date.now() + 30_000) {
-          return current;
-        }
-        if (!current.refreshToken || (current.refreshTokenExpiresAt && current.refreshTokenExpiresAt <= new Date())) {
-          await tx.authSession.delete({ where: { id: sessionId } });
-          return null;
-        }
+    if (session?.origin === AuthOrigin.SIAU && session.siauSid) {
+      void this.siauService.notifyLogout(session.siauSid).catch(() => {
+        this.logger.warn('SIAU logout notification failed; the local session is already closed');
+      });
+    }
+  }
 
-        const tokens = await this.siauService.refresh(current.refreshToken);
-        if (tokens.claims.externalKey !== current.user.externalKey) {
-          await tx.authSession.delete({ where: { id: sessionId } });
-          return null;
-        }
-
-        return tx.authSession.update({
-          where: { id: sessionId },
-          data: {
-            accessToken: tokens.accessToken,
-            refreshToken: tokens.refreshToken ?? current.refreshToken,
-            accessTokenExpiresAt: tokens.accessTokenExpiresAt,
-            refreshTokenExpiresAt: tokens.refreshTokenExpiresAt ?? current.refreshTokenExpiresAt,
-            siauSid: tokens.claims.sid,
-          },
-          include: { user: true },
-        });
-      },
-      { timeout: 15_000 },
-    );
-
-    if (!session) throw new UnauthorizedException('SIAU session can no longer be refreshed');
-    return session;
+  async destroySiauSessionsBySid(sid: string): Promise<void> {
+    await this.prisma.authSession.deleteMany({
+      where: { origin: AuthOrigin.SIAU, siauSid: sid },
+    });
   }
 
   private generateSessionId(): string {

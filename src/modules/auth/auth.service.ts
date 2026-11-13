@@ -27,14 +27,14 @@ export class AuthService {
     return { session, account: this.buildAccount(user, AuthOrigin.LOCAL) };
   }
 
-  startSiauLogin(): Promise<string> {
-    return this.siauService.createAuthorizationUrl();
-  }
-
-  async completeSiauLogin(code: string, state: string) {
-    const tokens = await this.siauService.exchangeAuthorizationCode(code, state);
-    const externalKey = tokens.claims.externalKey;
-    const fullName = tokens.claims.name;
+  async completeSiauLogin(code: string, transaction: { codeVerifier: string; nonce: string }) {
+    const identity = await this.siauService.exchangeAuthorizationCode(
+      code,
+      transaction.codeVerifier,
+      transaction.nonce,
+    );
+    const externalKey = identity.externalKey;
+    const fullName = identity.name;
     let user = await this.prisma.user.findUnique({ where: { externalKey } });
 
     if (!user) {
@@ -55,7 +55,7 @@ export class AuthService {
       });
     }
 
-    const session = await this.sessionService.createSiau(user.id, tokens);
+    const session = await this.sessionService.createSiau(user.id, identity.sid);
     return { session, account: this.buildAccount(user, AuthOrigin.SIAU) };
   }
 
@@ -86,6 +86,7 @@ export class AuthService {
       menu: this.getFrontMenu(user.roles as UserRole[]),
       mustChangePassword: origin === AuthOrigin.LOCAL && user.mustChangePassword,
       authOrigin: origin,
+      canChangePassword: Boolean(user.password),
     };
   }
 

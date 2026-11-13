@@ -1,6 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 async function bootstrap() {
@@ -12,7 +12,12 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('api', {
+    exclude: [
+      { path: 'auth/login', method: RequestMethod.GET },
+      { path: 'auth/callback', method: RequestMethod.GET },
+    ],
+  });
   const publicOrigin = new URL(configService.getOrThrow<string>('SIREFO_PUBLIC_URL')).origin;
   const uiUrl = configService.get<string>('SIREFO_UI_URL');
   if (uiUrl) {

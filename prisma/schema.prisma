@@ -96,26 +96,25 @@ model User {
 }
 
 model AuthSession {
-  id                    String     @id
-  user                  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId                Int
-  origin                AuthOrigin
-  accessToken           String?
-  refreshToken          String?
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  siauSid               String?
-  expiresAt             DateTime
-  createdAt             DateTime   @default(now())
-  updatedAt             DateTime   @updatedAt
-  lastUsedAt            DateTime   @default(now())
+  id         String     @id
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId     Int
+  origin     AuthOrigin
+  siauSid    String?
+  expiresAt  DateTime
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  lastUsedAt DateTime   @default(now())
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([siauSid])
 }
 
 model OAuthTransaction {
+  id           String   @unique
   state        String   @id
+  nonce        String
   codeVerifier String
   expiresAt    DateTime
   createdAt    DateTime @default(now())

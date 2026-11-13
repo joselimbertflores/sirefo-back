@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
@@ -63,7 +63,7 @@ export class SirefoService {
       if (error instanceof AxiosError && error.code === 'ERR_BAD_RESPONSE') {
         const data = this.parseXMLResponse(error.response?.data);
         if (data['Envelope']['Body']['Fault']['faultcode'] === 's:Client') {
-          throw new UnauthorizedException(`Credenciales incorrectas`);
+          throw new BadRequestException('Credenciales ASFI incorrectas');
         }
       }
       throw new InternalServerErrorException('Error al consultar cabeceras');
