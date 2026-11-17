@@ -1,11 +1,9 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
-import * as bcrypt from 'bcrypt';
-import { AuthOrigin, AuthSession, User } from 'generated/prisma';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Prisma, User } from 'generated/prisma';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { UserRole } from '../users/domain';
 import { FRONTEND_MENU, Menu } from './constants';
-import { AuthDto, UpdateMyUserDto } from './dto';
 import { SessionService } from './services/session.service';
 import { SiauService } from './services/siau.service';
 
@@ -17,16 +15,6 @@ export class AuthService {
     private readonly siauService: SiauService,
   ) {}
 
-  async loginLocal({ login, password }: AuthDto) {
-    const user = await this.prisma.user.findUnique({ where: { login } });
-    if (!user?.password || !bcrypt.compareSync(password, user.password)) {
-      throw new UnauthorizedException('Usuario o Contraseña incorrectos');
-    }
-
-    const session = await this.sessionService.createLocal(user.id);
-    return { session, account: this.buildAccount(user, AuthOrigin.LOCAL) };
-  }
-
   async completeSiauLogin(code: string, transaction: { codeVerifier: string; nonce: string }) {
     const identity = await this.siauService.exchangeAuthorizationCode(
       code,
@@ -34,48 +22,32 @@ export class AuthService {
       transaction.nonce,
     );
     const externalKey = identity.externalKey;
+    if (typeof externalKey !== 'string' || !externalKey.trim()) {
+      throw new UnauthorizedException('Invalid SIAU externalKey');
+    }
     const fullName = identity.name;
     let user = await this.prisma.user.findUnique({ where: { externalKey } });
 
     if (!user) {
-      user = await this.prisma.user.create({
-        data: {
-          externalKey,
-          fullName,
-          position: null,
-          login: null,
-          password: null,
-          roles: [UserRole.EMPLOYEE],
-        },
-      });
-    } else if (user.fullName !== fullName) {
-      user = await this.prisma.user.update({
-        where: { id: user.id },
-        data: { fullName },
-      });
+      try {
+        user = await this.prisma.user.create({
+          data: {
+            externalKey,
+            fullName,
+          },
+        });
+      } catch (error) {
+        if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+        user = await this.prisma.user.findUnique({ where: { externalKey } });
+        if (!user) throw error;
+      }
     }
 
     const session = await this.sessionService.createSiau(user.id, identity.sid);
-    return { session, account: this.buildAccount(user, AuthOrigin.SIAU) };
+    return { session, account: this.getMyAccount(user) };
   }
 
-  getMyAccount(user: User, session: AuthSession) {
-    return this.buildAccount(user, session.origin);
-  }
-
-  async updateMyUser(user: User, data: UpdateMyUserDto) {
-    if (!user.password) {
-      throw new BadRequestException('SIAU-only users do not have a local password');
-    }
-    const encryptedPassword = await this.encryptPassword(data.password);
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { password: encryptedPassword, mustChangePassword: false },
-    });
-    return { message: 'Contraseña actualizada' };
-  }
-
-  private buildAccount(user: User, origin: AuthOrigin) {
+  getMyAccount(user: User) {
     return {
       user: {
         userId: user.id,
@@ -84,9 +56,6 @@ export class AuthService {
       },
       roles: user.roles,
       menu: this.getFrontMenu(user.roles as UserRole[]),
-      mustChangePassword: origin === AuthOrigin.LOCAL && user.mustChangePassword,
-      authOrigin: origin,
-      canChangePassword: Boolean(user.password),
     };
   }
 
@@ -104,10 +73,5 @@ export class AuthService {
         return !item.role || userRoles.includes(item.role) ? item : null;
       })
       .filter((item): item is Menu => item !== null);
-  }
-
-  private async encryptPassword(password: string): Promise<string> {
-    const salt = await bcrypt.genSalt(10);
-    return bcrypt.hash(password, salt);
   }
 }

@@ -1,7 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
-import { AuthOrigin, AuthSession, User } from 'generated/prisma';
+import { AuthSession, User } from 'generated/prisma';
 
 import { EnvVars } from 'src/config';
 import { PrismaService } from 'src/modules/prisma/prisma.service';
@@ -26,23 +26,11 @@ export class SessionService {
     return this.sessionTtlMilliseconds;
   }
 
-  async createLocal(userId: number): Promise<AuthSession> {
-    return this.prisma.authSession.create({
-      data: {
-        id: this.generateSessionId(),
-        userId,
-        origin: AuthOrigin.LOCAL,
-        expiresAt: this.getSessionExpiration(),
-      },
-    });
-  }
-
   async createSiau(userId: number, sid: string): Promise<AuthSession> {
     return this.prisma.authSession.create({
       data: {
         id: this.generateSessionId(),
         userId,
-        origin: AuthOrigin.SIAU,
         siauSid: sid,
         expiresAt: this.getSessionExpiration(),
       },
@@ -55,7 +43,7 @@ export class SessionService {
       include: { user: true },
     });
 
-    if (!session || session.expiresAt <= new Date()) {
+    if (!session || !session.siauSid || session.expiresAt <= new Date()) {
       if (session) await this.destroy(session.id);
       throw new UnauthorizedException();
     }
@@ -75,12 +63,12 @@ export class SessionService {
   async logout(sessionId: string): Promise<void> {
     const session = await this.prisma.authSession.findUnique({
       where: { id: sessionId },
-      select: { origin: true, siauSid: true },
+      select: { siauSid: true },
     });
 
     await this.destroy(sessionId);
 
-    if (session?.origin === AuthOrigin.SIAU && session.siauSid) {
+    if (session?.siauSid) {
       void this.siauService.notifyLogout(session.siauSid).catch(() => {
         this.logger.warn('SIAU logout notification failed; the local session is already closed');
       });
@@ -89,7 +77,7 @@ export class SessionService {
 
   async destroySiauSessionsBySid(sid: string): Promise<void> {
     await this.prisma.authSession.deleteMany({
-      where: { origin: AuthOrigin.SIAU, siauSid: sid },
+      where: { siauSid: sid },
     });
   }
 

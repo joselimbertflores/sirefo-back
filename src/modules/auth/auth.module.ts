@@ -21,5 +21,6 @@ import { SiauService } from './services/siau.service';
       useClass: SessionAuthGuard,
     },
   ],
+  exports: [SiauService],
 })
 export class AuthModule {}

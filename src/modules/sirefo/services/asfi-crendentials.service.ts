@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from 'src/modules/prisma/prisma.service';
 
 import { CryptoService } from './crypto.service';
@@ -10,6 +10,13 @@ export class AsfiCrendentialsService {
     private prisma: PrismaService,
     private cryptoService: CryptoService,
   ) {}
+
+  async resetCredentials(userId: number) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) throw new NotFoundException('El usuario seleccionado no existe');
+    await this.prisma.asfiCredentials.deleteMany({ where: { userId } });
+    return { message: 'Credenciales ASFI restablecidas en SIREFO' };
+  }
 
   async setCredentials(userId: number, { asfiPassword, asfiUsername }: AsfiCredentialsDto) {
     const user = await this.prisma.user.findUnique({

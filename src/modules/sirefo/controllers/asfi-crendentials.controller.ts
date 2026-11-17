@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
 import { User } from 'generated/prisma';
 
 import { GetUserRequest, Role } from 'src/modules/auth/decorators';
@@ -35,5 +35,11 @@ export class AsfiCrendentialsController {
   async validateCredentials(@Body() { asfiUsername, asfiPassword }: AsfiCredentialsDto) {
     await this.sirefoService.consultarCabecera({ email: asfiUsername, password: asfiPassword });
     return { ok: true, message: 'Valid credentials' };
+  }
+
+  @Delete(':userId')
+  @Role(UserRole.ADMIN)
+  resetCredentials(@Param('userId', ParseIntPipe) userId: number) {
+    return this.asfiCredentials.resetCredentials(userId);
   }
 }

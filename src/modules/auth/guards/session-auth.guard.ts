@@ -22,7 +22,6 @@ export class SessionAuthGuard implements CanActivate {
     const sessionId = readSessionCookie(request.headers.cookie);
     const session = await this.sessionService.authenticate(sessionId);
     request['user'] = session.user;
-    request['authSession'] = session;
     return true;
   }
 }

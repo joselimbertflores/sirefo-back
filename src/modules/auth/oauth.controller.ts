@@ -1,6 +1,7 @@
 import { BadGatewayException, BadRequestException, Controller, Get, Logger, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CookieOptions, Request, Response } from 'express';
+import { Prisma } from 'generated/prisma';
 
 import { EnvVars } from 'src/config';
 import { AuthService } from './auth.service';
@@ -67,7 +68,29 @@ export class OAuthController {
       });
       return response.redirect(this.frontendUrl('/'));
     } catch (error) {
-      this.logger.warn(`SIAU callback failed: ${error instanceof Error ? error.name : 'Unknown error'}`);
+      if (
+        (this.configService.get('NODE_ENV') ?? 'development') === 'development' &&
+        error instanceof Prisma.PrismaClientKnownRequestError
+      ) {
+        // Prisma messages can include query arguments; only log schema metadata.
+        const { modelName, column, field_name, target, constraint } = error.meta ?? {};
+        const operation = error.message
+          .match(/\b(user|authSession|oAuthTransaction)\.(findUnique|create|update|deleteMany)\(/)?.[0]
+          .slice(0, -1);
+        this.logger.warn({
+          message: 'SIAU callback failed',
+          name: error.name,
+          code: error.code,
+          operation,
+          modelName,
+          column,
+          field_name,
+          target,
+          constraint,
+        });
+      } else {
+        this.logger.warn(`SIAU callback failed: ${error instanceof Error ? error.name : 'Unknown error'}`);
+      }
       const code =
         error instanceof BadGatewayException
           ? 'siau_unavailable'

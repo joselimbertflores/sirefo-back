@@ -79,32 +79,28 @@ model AsfiTransferFile {
 }
 
 model User {
-  id                 Int                @id @default(autoincrement())
-  fullName           String
-  position           String?
-  asfiCredentials    AsfiCredentials?
-  login              String?            @unique
-  password           String?
-  externalKey        String?            @unique
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  roles              String[]           @default(["employee"])
-  mustChangePassword Boolean            @default(false)
-  asfiFundTransfer   AsfiFundTransfer[]
-  asfiRequest        AsfiRequest[]
-  authSessions       AuthSession[]
+  id               Int                @id @default(autoincrement())
+  fullName         String
+  position         String?
+  asfiCredentials  AsfiCredentials?
+  externalKey      String?            @unique
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  roles            String[]           @default(["employee"])
+  asfiFundTransfer AsfiFundTransfer[]
+  asfiRequest      AsfiRequest[]
+  authSessions     AuthSession[]
 }
 
 model AuthSession {
-  id         String     @id
-  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String   @id
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId     Int
-  origin     AuthOrigin
-  siauSid    String?
+  siauSid    String
   expiresAt  DateTime
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-  lastUsedAt DateTime   @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  lastUsedAt DateTime @default(now())
 
   @@index([userId])
   @@index([expiresAt])
@@ -141,9 +137,4 @@ enum AsfiRequestStatus {
   sent
   rejected
   accepted
-}
-
-enum AuthOrigin {
-  LOCAL
-  SIAU
 }

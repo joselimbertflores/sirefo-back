@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 
 import { PaginationDto } from 'src/modules/common';
 
-import { CreateUserDto, UpdateUserDto } from './dtos';
+import { AssignableUserQueryDto, CreateUserDto, UpdateUserDto } from './dtos';
 import { UserService } from './user.service';
 import { Role } from '../auth/decorators';
 import { UserRole } from './domain';
@@ -17,13 +17,18 @@ export class UserController {
     return this.userService.findAll(params);
   }
 
-  @Post()
-  create(@Body() userDto: CreateUserDto) {
-    return this.userService.create(userDto);
+  @Patch(':id')
+  update(@Param('id', ParseIntPipe) userId: number, @Body() job: UpdateUserDto) {
+    return this.userService.update(userId, job);
   }
 
-  @Patch(':id')
-  update(@Param('id') userId: string, @Body() job: UpdateUserDto) {
-    return this.userService.update(+userId, job);
+  @Get('assignable')
+  findAssignable(@Query() query: AssignableUserQueryDto) {
+    return this.userService.findAssignable(query.term);
+  }
+
+  @Post()
+  create(@Body() user: CreateUserDto) {
+    return this.userService.create(user);
   }
 }

@@ -1,4 +1,10 @@
-import { BadGatewayException, BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadGatewayException,
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios from 'axios';
 import { createHash, randomBytes } from 'crypto';
@@ -7,7 +13,7 @@ import { createRemoteJWKSet, errors, jwtVerify, RemoteJWKSet } from 'jose';
 import { EnvVars } from 'src/config';
 import { PrismaService } from 'src/modules/prisma/prisma.service';
 import { OAUTH_TRANSACTION_TTL_MS } from '../constants';
-import { SiauIdentity } from '../interfaces';
+import { SiauAssignableUser, SiauIdentity } from '../interfaces';
 
 @Injectable()
 export class SiauService {
@@ -36,6 +42,56 @@ export class SiauService {
     this.tokenAuthorization = `Basic ${Buffer.from(credentials).toString('base64')}`;
     this.redirectUri = `${sirefoPublicUrl}/auth/callback`;
     this.jwks = createRemoteJWKSet(new URL(`${this.internalUrl}/.well-known/jwks.json`));
+  }
+
+  async searchAssignableUsers(term?: string): Promise<SiauAssignableUser[]> {
+    try {
+      const { data } = await axios.get<SiauAssignableUser[]>(`${this.internalUrl}/internal/users/assignable`, {
+        params: { term: term?.trim() },
+        auth: { username: this.clientId, password: this.clientSecret },
+        timeout: 10_000,
+      });
+      if (!Array.isArray(data)) throw new BadGatewayException('SIAU devolvió una lista de funcionarios inválida');
+      return data.map((user) => this.toAssignableUser(user));
+    } catch {
+      throw new BadGatewayException('No fue posible buscar funcionarios asignables en SIAU');
+    }
+  }
+
+  async findAssignableUser(externalKey: string): Promise<SiauAssignableUser> {
+    try {
+      const { data } = await axios.get<SiauAssignableUser>(
+        `${this.internalUrl}/internal/users/assignable/${encodeURIComponent(externalKey)}`,
+        {
+          auth: { username: this.clientId, password: this.clientSecret },
+          timeout: 10_000,
+        },
+      );
+      const user = this.toAssignableUser(data);
+      if (user.externalKey !== externalKey) throw new BadGatewayException('SIAU devolvió una identidad diferente');
+      return user;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        throw new NotFoundException('El funcionario no está activo o no tiene SIREFO asignado en SIAU');
+      }
+      throw new BadGatewayException('No fue posible validar el funcionario en SIAU');
+    }
+  }
+
+  private toAssignableUser(user: SiauAssignableUser): SiauAssignableUser {
+    if (
+      typeof user?.externalKey !== 'string' ||
+      !user.externalKey.trim() ||
+      typeof user.fullName !== 'string' ||
+      !user.fullName.trim() ||
+      typeof user.login !== 'string' ||
+      !user.login.trim() ||
+      (user.email !== null && typeof user.email !== 'string')
+    ) {
+      throw new BadGatewayException('SIAU devolvió un funcionario inválido');
+    }
+    const { externalKey, fullName, email, login } = user;
+    return { externalKey, fullName, email, login };
   }
 
   async createAuthorizationUrl(): Promise<{ url: string; transactionId: string }> {

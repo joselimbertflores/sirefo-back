@@ -4,3 +4,10 @@ export interface SiauIdentity {
   name: string;
   sid: string;
 }
+
+export interface SiauAssignableUser {
+  externalKey: string;
+  fullName: string;
+  email: string | null;
+  login: string;
+}

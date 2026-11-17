@@ -1,15 +1,42 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 
-import { Prisma, User } from 'generated/prisma';
-import * as bcrypt from 'bcrypt';
+import { Prisma } from 'generated/prisma';
 
 import { PaginationDto } from 'src/modules/common/dtos/pagination.dto';
 import { PrismaService } from 'src/modules/prisma/prisma.service';
 import { CreateUserDto, UpdateUserDto } from './dtos';
+import { SiauService } from '../auth/services/siau.service';
+import { UserRole } from './domain';
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private siauService: SiauService,
+  ) {}
+
+  findAssignable(term?: string) {
+    return this.siauService.searchAssignableUsers(term);
+  }
+
+  async create({ externalKey, position, roles }: CreateUserDto) {
+    const identity = await this.siauService.findAssignableUser(externalKey);
+    try {
+      return await this.prisma.user.create({
+        data: {
+          externalKey: identity.externalKey,
+          fullName: identity.fullName,
+          position,
+          roles: roles ?? [UserRole.EMPLOYEE],
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('El funcionario ya está registrado en SIREFO; utilice la opción de editar');
+      }
+      throw error;
+    }
+  }
 
   async findAll({ limit, offset, term }: PaginationDto) {
     const where: Prisma.UserWhereInput = {
@@ -29,42 +56,12 @@ export class UserService {
       }),
       this.prisma.user.count({ where }),
     ]);
-    return { users: users.map((user) => this.plainUser(user)), length };
-  }
-
-  async create({ password, ...props }: CreateUserDto) {
-    await this.checkDuplicateLogin(props.login);
-    const encryptedPassword = await this.encryptPassword(password);
-    const createdUser = await this.prisma.user.create({
-      data: { ...props, password: encryptedPassword },
-    });
-    return this.plainUser(createdUser);
+    return { users, length };
   }
 
   async update(id: number, user: UpdateUserDto) {
     const userDB = await this.prisma.user.findFirst({ where: { id } });
     if (!userDB) throw new NotFoundException(`El usuario editado no existe`);
-    if (user.login !== undefined && user.login !== userDB.login) await this.checkDuplicateLogin(user.login);
-    if (user.password) user['password'] = await this.encryptPassword(user.password);
-    const updateduser = await this.prisma.user.update({ where: { id }, data: user });
-    return this.plainUser(updateduser);
-  }
-
-  private async checkDuplicateLogin(login: string): Promise<void> {
-    const duplicate = await this.prisma.user.findFirst({ where: { login } });
-    if (duplicate) {
-      throw new BadRequestException(`El login ${login} ya existe`);
-    }
-  }
-
-  private async encryptPassword(password: string): Promise<string> {
-    const saltRounds = 10;
-    const salt = await bcrypt.genSalt(saltRounds);
-    return bcrypt.hash(password, salt);
-  }
-
-  private plainUser(user: User) {
-    delete user.password;
-    return user;
+    return this.prisma.user.update({ where: { id }, data: user });
   }
 }

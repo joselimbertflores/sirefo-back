@@ -1,11 +1,12 @@
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsEmail, IsString, Matches, MinLength } from 'class-validator';
 
 export class AsfiCredentialsDto {
   @IsString()
-  @IsNotEmpty()
+  @IsEmail()
   asfiUsername: string;
 
   @IsString()
-  @IsNotEmpty()
+  @MinLength(4)
+  @Matches(/\S/)
   asfiPassword: string;
 }
